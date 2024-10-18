@@ -14,6 +14,7 @@ from networks.Networks import *
 from losses.LossFunctions import *
 from metrics.Metrics import *
 import matplotlib.pyplot as plt
+from .pytorchtools import EarlyStopping
 
 class GMVAE:
 
@@ -21,7 +22,12 @@ class GMVAE:
     self.num_epochs = args.epochs
     self.cuda = args.cuda
     self.verbose = args.verbose
-
+      
+    ## early stopping and saving 
+    self.patience = args.patience
+    self.delta = args.delta
+    self.path = args.path
+      
     self.batch_size = args.batch_size
     self.batch_size_val = args.batch_size_val
     self.learning_rate = args.learning_rate
@@ -243,12 +249,22 @@ class GMVAE:
         output: (dict) contains the history of train/val loss
     """
     optimizer = optim.Adam(self.network.parameters(), lr=self.learning_rate)
+    early_stopping = EarlyStopping(patience=self.patience, delta=self.delta, path=self.path,  verbose=True)
+      
     train_history_acc, val_history_acc = [], []
     train_history_nmi, val_history_nmi = [], []
+    train_rec_all, train_gauss_all, train_cat_all = [], [], []
+    val_rec_all, val_gauss_all, val_cat_all = [], [], []
 
     for epoch in range(1, self.num_epochs + 1):
       train_loss, train_rec, train_gauss, train_cat, train_acc, train_nmi = self.train_epoch(optimizer, train_loader)
       val_loss, val_rec, val_gauss, val_cat, val_acc, val_nmi = self.test(val_loader, True)
+      train_rec_all.append(train_rec) 
+      train_gauss_all.append(train_gauss) 
+      train_cat_all.append(train_cat)
+      val_rec_all.append(val_rec) 
+      val_gauss_all.append(val_gauss) 
+      val_cat_all.append(val_cat)
 
       # if verbose then print specific information about training
       if self.verbose == 1:
@@ -262,7 +278,12 @@ class GMVAE:
       else:
         print('(Epoch %d / %d) Train_Loss: %.3lf; Val_Loss: %.3lf   Train_ACC: %.3lf; Val_ACC: %.3lf   Train_NMI: %.3lf; Val_NMI: %.3lf' % \
               (epoch, self.num_epochs, train_loss, val_loss, train_acc, val_acc, train_nmi, val_nmi))
-
+      early_stopping(val_loss, self.network)
+        
+      if early_stopping.early_stop:
+        print("Early stopping")
+        break
+          
       # decay gumbel temperature
       if self.decay_temp == 1:
         self.gumbel_temp = np.maximum(self.init_temp * np.exp(-self.decay_temp_rate * epoch), self.min_temp)
@@ -273,7 +294,10 @@ class GMVAE:
       val_history_acc.append(val_acc)
       train_history_nmi.append(train_nmi)
       val_history_nmi.append(val_nmi)
-    return {'train_history_nmi' : train_history_nmi, 'val_history_nmi': val_history_nmi,
+    return {
+      'train_rec': train_rec_all, 'train_gauss': train_gauss_all, 'train_cat': train_cat_all,
+      'val_rec':val_rec_all, 'val_gauss':val_gauss_all, 'val_cat':val_cat_all, 
+      'train_history_nmi' : train_history_nmi, 'val_history_nmi': val_history_nmi,
             'train_history_acc': train_history_acc, 'val_history_acc': val_history_acc}
   
 
